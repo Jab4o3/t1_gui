@@ -1,6 +1,9 @@
+"""
+Pulse generation script for the Analog Discovery 2 using the Digilent SDK
+"""
+
 from ctypes import *
 from dwfconstants import *
-import time
 import sys
 
 if sys.platform.startswith("win"):
