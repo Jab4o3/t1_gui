@@ -13,13 +13,13 @@ elif sys.platform.startswith("darwin"):
 else:
     dwf = cdll.LoadLibrary("libdwf.so")
 
-hzFreq = 100
+f_pattern = 100
 pattern_size = 4096
 td = 1  # dark time (in buffer slots)
 pw = 5  # pulse width (in buffer slots)
 print("+++++++++++++++++++++++++++")
-print("Dark time: " + str((10 ** 6) * td / (hzFreq * pattern_size)) + " us")
-print("Pulse width: " + str((10 ** 6) * pw / (hzFreq * pattern_size)) + " us")
+print("Dark time: " + str((10 ** 6) * td / (f_pattern * pattern_size)) + " us")
+print("Pulse width: " + str((10 ** 6) * pw / (f_pattern * pattern_size)) + " us")
 print("+++++++++++++++++++++++++++")
 hdwf = c_int()
 # pattern = (c_double * pattern_size)()
@@ -62,9 +62,9 @@ if hdwf.value == hdwfNone.value:
 # disable auto config for better performance
 dwf.FDwfDeviceAutoConfigureSet(hdwf, c_int(0))
 
-phzFreq = c_double()
-dwf.FDwfDigitalOutInternalClockInfo(hdwf, byref(phzFreq))
-print("Clock frequency: " + phzFreq.value.__str__())
+pf_pattern = c_double()
+dwf.FDwfDigitalOutInternalClockInfo(hdwf, byref(pf_pattern))
+print("Clock frequency: " + pf_pattern.value.__str__())
 
 print("Generating custom waveform...")
 print("Enable: " + dwf.FDwfAnalogOutNodeEnableSet(hdwf, channel, AnalogOutNodeCarrier, c_int(1)).__str__())
@@ -73,13 +73,13 @@ print("Set function to custom: " + dwf.FDwfAnalogOutNodeFunctionSet(hdwf, channe
 print("Set data pattern: " + dwf.FDwfAnalogOutNodeDataSet(hdwf, channel, AnalogOutNodeCarrier, pattern,
                                                           c_int(pattern_size)).__str__())
 print("Set frequency: " + dwf.FDwfAnalogOutNodeFrequencySet(hdwf, channel, AnalogOutNodeCarrier,
-                                                            c_double(hzFreq)).__str__())
+                                                            c_double(f_pattern)).__str__())
 print(
     "Set amplitude: " + dwf.FDwfAnalogOutNodeAmplitudeSet(hdwf, channel, AnalogOutNodeCarrier, c_double(5.0)).__str__())
 
 print("Run period set: " + dwf.FDwfAnalogOutRunSet(hdwf, channel,
-                                                   c_double(10000.0 / hzFreq)).__str__())  # run for 2 periods
-# print("Wait period set: " + dwf.FDwfAnalogOutWaitSet(hdwf, channel, c_double(1000.0 / hzFreq)).__str__())  # wait one pulse time
+                                                   c_double(10000.0 / f_pattern)).__str__())  # run for 2 periods
+# print("Wait period set: " + dwf.FDwfAnalogOutWaitSet(hdwf, channel, c_double(1000.0 / f_pattern)).__str__())  # wait one pulse time
 print("Repetitions set: " + dwf.FDwfAnalogOutRepeatSet(hdwf, channel, c_int(3)).__str__())  # repeat 3 times
 
 print("Output config: " + dwf.FDwfAnalogOutConfigure(hdwf, channel, c_int(1)).__str__())
