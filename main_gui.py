@@ -15,7 +15,7 @@ class Gui:
         self.root = root
         self.root.title(title)
         self.root.resizable(height=False, width=False)  # make window non-resizable
-        # associate entries and scales with object for callback
+        # associate entries and scales with object for callback references
         # minimum dark time
         self.td_min = tk.DoubleVar(root, value=1)
         self.scale_td_min = None
@@ -28,7 +28,6 @@ class Gui:
         self.dps = tk.DoubleVar(root, value=10)
         self.scale_dps = None
         self.entry_dps = None
-        # TODO: Add tracking to variables
 
         self.populate()
 
@@ -42,26 +41,58 @@ class Gui:
         return
 
     """
-    Callback for updating minimum dark time variable based on slider
+    Callback for updating minimum dark time variable and entry based on slider
     """
 
-    def callback_td_min(self):
-        print("Min callback")
-        self.update_entry(self.entry_td_min, self.td_min.get())
+    def callback_s_td_min(self, event):
+        if self.scale_td_min != self.td_min.get():
+            self.td_min.set(self.scale_td_min.get())
+            self.update_entry(self.entry_td_min, self.td_min.get())
 
     """
-    Callback for updating maximum dark time variable based on slider
+    Callback for updating maximum dark time variable and entry based on slider
     """
 
-    def callback_td_max(self):
-        self.update_entry(self.entry_td_max, self.td_max.get())
+    def callback_s_td_max(self, event):
+        if self.scale_td_max != self.td_max.get():
+            self.td_max.set(self.scale_td_max.get())
+            self.update_entry(self.entry_td_max, self.td_max.get())
 
     """
-    Callback for updating number of data points based on slider
+    Callback for updating number of data points variable and entry based on slider
     """
 
-    def callback_dps(self):
-        self.update_entry(self.entry_dps, self.dps.get())
+    def callback_s_dps(self, event):
+        if self.scale_dps.get() != self.dps.get():
+            self.dps.set(self.scale_dps.get())
+            self.update_entry(self.entry_dps, self.dps.get())
+
+    """
+       Callback for updating minimum dark time variable and slider based on entry
+       """
+
+    def callback_e_td_min(self, event):
+        if float(self.entry_td_min.get()) != self.td_min.get():
+            self.td_min.set(self.entry_td_min.get())
+            self.scale_td_min.set(self.td_min.get())
+
+    """
+    Callback for updating maximum dark time variable and slider based on entry
+    """
+
+    def callback_e_td_max(self, event):
+        if float(self.entry_td_max.get()) != self.td_max.get():
+            self.td_max.set(self.entry_td_max.get())
+            self.scale_td_max.set(self.td_max.get())
+
+    """
+    Callback for updating number of data points variable and slider based on entry
+    """
+
+    def callback_e_dps(self, event):
+        if float(self.entry_dps.get()) != self.dps.get():
+            self.dps.set(self.entry_dps.get())
+            self.scale_dps.set(self.dps.get())
 
     """
     Put GUI objects in app
@@ -102,20 +133,21 @@ class Gui:
         self.entry_td_max = ttk.Entry(lf_inputs)
         self.entry_dps = ttk.Entry(lf_inputs)
 
+        # create scalers and bind to callbacks
+        self.scale_td_min = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL)
+        self.scale_td_min.bind("<ButtonRelease-1>", self.callback_s_td_min)
+        self.scale_td_max = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL)
+        self.scale_td_max.bind("<ButtonRelease-1>", self.callback_s_td_max)
+        self.scale_dps = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL)
+        self.scale_dps.bind("<ButtonRelease-1>", self.callback_s_dps)
+
         # put entry boxes in app and initialize their values to the default ones
         self.entry_td_min.grid(row=0, column=2, padx=5, pady=5)
+        self.entry_td_min.bind("<Return>", self.callback_e_td_min)
         self.entry_td_max.grid(row=1, column=2, padx=5, pady=5)
+        self.entry_td_max.bind("<Return>", self.callback_e_td_max)
         self.entry_dps.grid(row=2, column=2, padx=5, pady=5)
-        self.update_entry(self.entry_td_min, self.td_min.get())
-        self.update_entry(self.entry_td_max, self.td_max.get())
-        self.update_entry(self.entry_dps, self.dps.get())
-
-        # create scalers
-        self.scale_td_min = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL, command=self.callback_td_min)
-        self.scale_td_max = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL,
-                                     command=self.callback_td_max)
-        self.scale_dps = tk.Scale(lf_inputs,  from_=1, to=100, orient=tk.HORIZONTAL,
-                                  command=self.callback_dps)
+        self.entry_dps.bind("<Return>", self.callback_e_dps)
 
         # put scalers in app
         self.scale_td_min.grid(row=0, column=1, padx=5, pady=5)
