@@ -15,9 +15,19 @@ class Gui:
         self.root = root
         self.root.title(title)
         self.root.resizable(height=False, width=False)  # make window non-resizable
-        self.td_min = tk.DoubleVar(root, value=0)
-        self.td_max = tk.DoubleVar(root, value=0)
-        self.dps = tk.DoubleVar(root, value=0)
+        # associate entries and scales with object for callback
+        # minimum dark time
+        self.td_min = tk.DoubleVar(root, value=1)
+        self.scale_td_min = None
+        self.entry_td_min = None
+        # maximum dark time
+        self.td_max = tk.DoubleVar(root, value=1)
+        self.scale_td_max = None
+        self.entry_td_max = None
+        # number of data points
+        self.dps = tk.DoubleVar(root, value=10)
+        self.scale_dps = None
+        self.entry_dps = None
         # TODO: Add tracking to variables
 
         self.populate()
@@ -32,13 +42,26 @@ class Gui:
         return
 
     """
-       Set value of Tkinter entry
-       """
+    Callback for updating minimum dark time variable based on slider
+    """
 
-    def update_entry_from_scroller(self, e, s, value):
-        e.delete(0, tk.END)
-        e.insert(0, value)
-        return
+    def callback_td_min(self):
+        print("Min callback")
+        self.update_entry(self.entry_td_min, self.td_min.get())
+
+    """
+    Callback for updating maximum dark time variable based on slider
+    """
+
+    def callback_td_max(self):
+        self.update_entry(self.entry_td_max, self.td_max.get())
+
+    """
+    Callback for updating number of data points based on slider
+    """
+
+    def callback_dps(self):
+        self.update_entry(self.entry_dps, self.dps.get())
 
     """
     Put GUI objects in app
@@ -74,28 +97,30 @@ class Gui:
         label_td_max.grid(row=1, column=0, sticky="W", padx=5, pady=5)
         label_dps.grid(row=2, column=0, sticky="W", padx=5, pady=5)
 
-        # create scalers
-        scaler_td_min = tk.Scale(lf_inputs, variable=self.td_min, from_=1, to=100, orient=tk.HORIZONTAL)
-        scaler_td_max = tk.Scale(lf_inputs, variable=self.td_max, from_=1, to=100, orient=tk.HORIZONTAL)
-        scaler_dps = tk.Scale(lf_inputs, variable=self.dps, from_=1, to=100, orient=tk.HORIZONTAL)
-
-        # put scalers in app
-        scaler_td_min.grid(row=0, column=1, padx=5, pady=5)
-        scaler_td_max.grid(row=1, column=1, padx=5, pady=5)
-        scaler_dps.grid(row=2, column=1, padx=5, pady=5)
-
         # create entry boxes
-        entry_td_min = ttk.Entry(lf_inputs)
-        entry_td_max = ttk.Entry(lf_inputs)
-        entry_dps = ttk.Entry(lf_inputs)
+        self.entry_td_min = ttk.Entry(lf_inputs)
+        self.entry_td_max = ttk.Entry(lf_inputs)
+        self.entry_dps = ttk.Entry(lf_inputs)
 
         # put entry boxes in app and initialize their values to the default ones
-        entry_td_min.grid(row=0, column=2, padx=5, pady=5)
-        entry_td_max.grid(row=1, column=2, padx=5, pady=5)
-        entry_dps.grid(row=2, column=2, padx=5, pady=5)
-        self.update_entry(entry_td_min, self.td_min)
-        self.update_entry(entry_td_max, self.td_max)
-        self.update_entry(entry_dps, self.td_max)
+        self.entry_td_min.grid(row=0, column=2, padx=5, pady=5)
+        self.entry_td_max.grid(row=1, column=2, padx=5, pady=5)
+        self.entry_dps.grid(row=2, column=2, padx=5, pady=5)
+        self.update_entry(self.entry_td_min, self.td_min.get())
+        self.update_entry(self.entry_td_max, self.td_max.get())
+        self.update_entry(self.entry_dps, self.dps.get())
+
+        # create scalers
+        self.scale_td_min = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL, command=self.callback_td_min)
+        self.scale_td_max = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL,
+                                     command=self.callback_td_max)
+        self.scale_dps = tk.Scale(lf_inputs,  from_=1, to=100, orient=tk.HORIZONTAL,
+                                  command=self.callback_dps)
+
+        # put scalers in app
+        self.scale_td_min.grid(row=0, column=1, padx=5, pady=5)
+        self.scale_td_max.grid(row=1, column=1, padx=5, pady=5)
+        self.scale_dps.grid(row=2, column=1, padx=5, pady=5)
 
         # =DATA FRAME=
         # create random figure
