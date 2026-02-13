@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk
@@ -8,6 +9,7 @@ import numpy as np
 from dwfconstants import *
 import sys
 from math import log10
+import threading
 
 if sys.platform.startswith("win"):
     dwf = cdll.dwf
@@ -31,15 +33,15 @@ class Gui:
         # device status entry
         self.status = tk.StringVar(root, value="Not connected")
         # minimum dark time
-        self.td_min = tk.DoubleVar(root, value=1)
-        self.scale_td_min = None
-        self.entry_td_min = None
+        self.p_width = tk.DoubleVar(root, value=1)
+        self.scale_p_width = None
+        self.entry_p_width = None
         # maximum dark time
         self.td_max = tk.DoubleVar(root, value=1)
         self.scale_td_max = None
         self.entry_td_max = None
         # number of data points
-        self.dps = tk.DoubleVar(root, value=10)
+        self.dps = tk.IntVar(root, value=10)
         self.scale_dps = None
         self.entry_dps = None
         # tree view for running log and status messages
@@ -55,6 +57,7 @@ class Gui:
         self.find_device()  # look for an AD2 on startup
 
         # =T1 measurements=
+        self.pattern_size = 4096  # fixed pattern buffer size
         self.sequences = []
 
     """
@@ -67,16 +70,20 @@ class Gui:
         if n <= 1:
             return result
 
-        for i in range(n - 1):
-            td_curr = round(10 ** (i * log10(td_max) / (n - 1)))
+        for i in range(n):
+            td_curr = td_min + round(10 ** (i * log10(td_max) / (n - 1)))
+            # exits prematurely if min and max are too close
+            if td_curr + td_min >= td_max:
+                result[-1] = td_max
+                return result
+
             # check if dark time is repeating last value and increment it if yes
             if td_curr - result[-1] >= 1:
-                result.append(td_curr + td_min)
+                result.append(td_curr)
             else:
-                result.append(result[-1] + 1 + td_min)
-        result.append(td_max)  # add last value manually to eliminate offset
+                result.append(result[-1] + 1)
+        # result.append(td_max)
         return result
-
 
     """
     Connect to AD2 or show that it is not connected
@@ -94,7 +101,9 @@ class Gui:
         dwf.FDwfParamSet(DwfParamOnClose, c_int(0))
 
         # open device and get interface reference
-        if dwf.FDwfDeviceOpen(c_int(-1), byref(self.hdwf)):
+        ret_code = dwf.FDwfDeviceOpen(c_int(-1), byref(self.hdwf))
+
+        if ret_code:
             self.log_message("AD2", "Connection", f"Connected to AD2, DWF Version {str(version.value)}")
             self.status.set("Connected")
         else:
@@ -104,32 +113,110 @@ class Gui:
 
         # disable auto config for better performance
         dwf.FDwfDeviceAutoConfigureSet(self.hdwf, c_int(0))
+        return ret_code
 
     """
     Generate sequences for pulsing
     """
 
     def t1_generate_sequences(self):
-        # TODO: add channel syncing and LIA sequences
         # constants
-        pattern_size = 4096  # fixed pattern buffer size
-        f_pattern = 1 / (pattern_size * self.td_min.get())  # set frequency of the whole pattern
-        # fixed minimum dark time to pulse width ratio
-        min_td = 1  # dark time (in buffer slots)
-        max_td = int(self.td_max.get() * f_pattern)  # TODO: verify formula
         pw = 5  # pulse width (in buffer slots)
-        all_tds = self.gen_log_space(td_min=min_td, td_max=max_td, n=self.dps.get()) # pseudo-logspace of dark times
+        min_td = 1  # minimum dark time (in buffer slots)
+        min_td_time = (10 ** -6) * min_td * self.p_width.get() / pw  # get minimum dark time (in seconds)
+        t_pattern = min_td_time * self.pattern_size  # set period of the whole pattern
+        f_pattern = 1 / t_pattern  # set frequency of the whole pattern
+        # fixed minimum dark time to pulse width ratio
+        max_td = round((10 ** -3) * self.td_max.get() / min_td_time)
+        if max_td < min_td:
+            self.log_message("T1", "Gen error", "Maximum dark time was calculated to be smaller than the minimum")
+            raise ValueError(f"Maximum dark time (td = {max_td}) cannot be smaller than the minimum (td = {min_td})")
+        if max_td > 2000:
+            self.log_message("T1", "Gen error",
+                             f"Maximum dark time is {max_td} bigger than minimum; should be less than 2000 ")
+            raise ValueError(f"Maximum dark time (td = {max_td}) too big for buffer")
+        all_tds = self.gen_log_space(td_min=min_td, td_max=max_td, n=self.dps.get())  # pseudo-logspace of dark times
 
         # make pattern
-        td = min_td
-        # loop for all data points
         for curr_td in all_tds:
-            pattern = (c_double * pattern_size)(0)  # initialize C-style zero array
+            pattern = (c_double * self.pattern_size)(0)  # initialize C-style zero array
             for i in range(0, pw):
                 pattern[i] = 1  # cancellation pulse
-                pattern[int(i + (pattern_size / 2))] = 1  # initialization pulse
-                pattern[int(i + pw + td + (pattern_size / 2))] = 1  # readout pulse
+                pattern[i + int(self.pattern_size / 2)] = 1  # initialization pulse
+                pattern[i + pw + curr_td + int(self.pattern_size / 2)] = 1  # readout pulse
+            self.sequences.append(pattern)
+        return f_pattern
 
+    """
+    Command for running T1 tests
+    """
+
+    def command_run_t1(self):
+        # exit if no device is found
+        if not self.hdwf:
+            self.log_message("T1", "Connection", "Connect a device to start tests")
+            return
+        f_pattern = self.t1_generate_sequences()  # generate all sequences
+
+        run_time = 50  # run time (in seconds)
+        wait_time = 50  # wait time (in seconds)
+        self.log_message("T1", "Test started", "Values generated successfully")
+        for i in range(len(self.sequences)):
+            pattern = self.sequences[i]
+            # =LASER CHANNEL CONFIG=
+            # enable
+            dwf.FDwfAnalogOutNodeEnableSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, c_int(1))
+
+            # set function to custom
+            dwf.FDwfAnalogOutNodeFunctionSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, funcCustom)
+
+            # set pattern of custom function
+            dwf.FDwfAnalogOutNodeDataSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, pattern,
+                                         c_int(self.pattern_size))
+
+            # set frequency of the whole pattern
+            dwf.FDwfAnalogOutNodeFrequencySet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, c_double(f_pattern))
+
+            # set amplitude of the whole pattern to 5V
+            dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, c_double(5.0))
+
+            # set the run and wait time (in seconds)
+            dwf.FDwfAnalogOutRunSet(self.hdwf, self.laser_channel, c_double(run_time / f_pattern))
+            dwf.FDwfAnalogOutWaitSet(self.hdwf, self.laser_channel, c_double(wait_time / f_pattern))
+
+            # =LIA CHANNEL CONFIG=
+            # enable
+            dwf.FDwfAnalogOutNodeEnableSet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, c_int(1))
+
+            # set function to pulse
+            dwf.FDwfAnalogOutNodeFunctionSet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, funcPulse)
+
+            # set pulse frequency
+            dwf.FDwfAnalogOutNodeFrequencySet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, c_double(f_pattern))
+
+            # set pulse amplitude to 5V
+            dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, c_double(5.0))
+
+            # set the run and wait time (in seconds)
+            dwf.FDwfAnalogOutRunSet(self.hdwf, self.lia_channel, c_double(run_time / f_pattern))
+            dwf.FDwfAnalogOutWaitSet(self.hdwf, self.lia_channel, c_double(wait_time / f_pattern))
+
+            self.log_message("T1", "Sequence started", f"Starting data point number {i + 1}")
+            # =OUTPUT=
+            # start outputting and wait for this sequence to complete before moving on
+            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
+            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
+            time.sleep(run_time + wait_time)
+
+        # reset and close device
+        dwf.FDwfAnalogOutReset(self.hdwf, self.laser_channel)
+        dwf.FDwfAnalogOutReset(self.hdwf, self.lia_channel)
+        dwf.FDwfDeviceCloseAll()
+
+    def thread_command_run_t1(self):
+        # Call work function
+        t1 = threading.Thread(target=self.command_run_t1)
+        t1.start()
 
     """
     Set value of Tkinter entry
@@ -157,10 +244,10 @@ class Gui:
     Callback for updating minimum dark time variable and entry based on slider
     """
 
-    def callback_s_td_min(self, event):
-        if self.scale_td_min != self.td_min.get():
-            self.td_min.set(self.scale_td_min.get())
-            self.update_entry(self.entry_td_min, self.td_min.get())
+    def callback_s_p_width(self, event):
+        if self.scale_p_width != self.p_width.get():
+            self.p_width.set(self.scale_p_width.get())
+            self.update_entry(self.entry_p_width, self.p_width.get())
 
     """
     Callback for updating maximum dark time variable and entry based on slider
@@ -184,10 +271,10 @@ class Gui:
        Callback for updating minimum dark time variable and slider based on entry
        """
 
-    def callback_e_td_min(self, event):
-        if float(self.entry_td_min.get()) != self.td_min.get():
-            self.td_min.set(self.entry_td_min.get())
-            self.scale_td_min.set(self.td_min.get())
+    def callback_e_p_width(self, event):
+        if float(self.entry_p_width.get()) != self.p_width.get():
+            self.p_width.set(self.entry_p_width.get())
+            self.scale_p_width.set(self.p_width.get())
 
     """
     Callback for updating maximum dark time variable and slider based on entry
@@ -258,7 +345,7 @@ class Gui:
         self.tree_running_log.column("#0", minwidth=10, width=70)
         self.tree_running_log.column("Source", minwidth=10, width=70)
         self.tree_running_log.column("Status", minwidth=10, width=70)
-        self.tree_running_log.column("Value", minwidth=10, width=210)
+        self.tree_running_log.column("Value", minwidth=10, width=300)
 
         # put tree in app
         self.tree_running_log.grid(row=0, column=0, sticky=("N", "W", "E", "S"), padx=5, pady=5)
@@ -268,36 +355,36 @@ class Gui:
 
         # =INPUT FRAME=
         # create labels
-        label_td_min = ttk.Label(lf_inputs, text="Minimum dark time")
-        label_td_max = ttk.Label(lf_inputs, text="Maximum dark time")
+        label_p_width = ttk.Label(lf_inputs, text="Pulse width (in us)")
+        label_td_max = ttk.Label(lf_inputs, text="Maximum dark time (in ms)")
         label_dps = ttk.Label(lf_inputs, text="Number of data points")
 
         # put labels in app
-        label_td_min.grid(row=0, column=0, sticky="W", padx=5, pady=5)
+        label_p_width.grid(row=0, column=0, sticky="W", padx=5, pady=5)
         label_td_max.grid(row=1, column=0, sticky="W", padx=5, pady=5)
         label_dps.grid(row=2, column=0, sticky="W", padx=5, pady=5)
 
         # create entry boxes
-        self.entry_td_min = ttk.Entry(lf_inputs)
+        self.entry_p_width = ttk.Entry(lf_inputs)
         self.entry_td_max = ttk.Entry(lf_inputs)
         self.entry_dps = ttk.Entry(lf_inputs)
 
         # create sliders and bind to callbacks
-        self.scale_td_min = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL)
-        self.scale_td_min.bind("<ButtonRelease-1>", self.callback_s_td_min)
-        self.scale_td_min.set(self.td_min.get())
-        self.scale_td_max = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL)
+        self.scale_p_width = tk.Scale(lf_inputs, from_=0.1, to=10, resolution=0.01, orient=tk.HORIZONTAL)
+        self.scale_p_width.bind("<ButtonRelease-1>", self.callback_s_p_width)
+        self.scale_p_width.set(self.p_width.get())
+        self.scale_td_max = tk.Scale(lf_inputs, from_=0.01, to=5, resolution=0.01, orient=tk.HORIZONTAL)
         self.scale_td_max.bind("<ButtonRelease-1>", self.callback_s_td_max)
         self.scale_td_max.set(self.td_max.get())
-        self.scale_dps = tk.Scale(lf_inputs, from_=1, to=100, orient=tk.HORIZONTAL)
+        self.scale_dps = tk.Scale(lf_inputs, from_=5, to=50, orient=tk.HORIZONTAL)
         self.scale_dps.bind("<ButtonRelease-1>", self.callback_s_dps)
         self.scale_dps.set(self.dps.get())
 
         # put entry boxes in app, bind them to callbacks and initialize their values to the default ones
-        self.entry_td_min.grid(row=0, column=2, padx=5, pady=5)
-        self.entry_td_min.bind("<Return>", self.callback_e_td_min)
-        self.entry_td_min.bind("<FocusOut>", self.callback_e_td_min)
-        self.update_entry(self.entry_td_min, self.td_min.get())
+        self.entry_p_width.grid(row=0, column=2, padx=5, pady=5)
+        self.entry_p_width.bind("<Return>", self.callback_e_p_width)
+        self.entry_p_width.bind("<FocusOut>", self.callback_e_p_width)
+        self.update_entry(self.entry_p_width, self.p_width.get())
         self.entry_td_max.grid(row=1, column=2, padx=5, pady=5)
         self.entry_td_max.bind("<Return>", self.callback_e_td_max)
         self.entry_td_max.bind("<FocusOut>", self.callback_e_td_max)
@@ -307,10 +394,16 @@ class Gui:
         self.entry_dps.bind("<FocusOut>", self.callback_e_dps)
         self.update_entry(self.entry_dps, self.dps.get())
 
-        # put scalers in app
-        self.scale_td_min.grid(row=0, column=1, padx=5, pady=5)
+        # put sliders in app
+        self.scale_p_width.grid(row=0, column=1, padx=5, pady=5)
         self.scale_td_max.grid(row=1, column=1, padx=5, pady=5)
         self.scale_dps.grid(row=2, column=1, padx=5, pady=5)
+
+        # create run button
+        button_run = ttk.Button(lf_inputs, text="Run", command=self.thread_command_run_t1)
+
+        # put run button in app
+        button_run.grid(row=0, column=3, rowspan=3, padx=5, pady=5)
 
         # =DATA FRAME=
         # create random figure

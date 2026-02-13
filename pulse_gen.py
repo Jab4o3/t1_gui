@@ -61,10 +61,10 @@ if hdwf.value == hdwfNone.value:
 
 # disable auto config for better performance
 dwf.FDwfDeviceAutoConfigureSet(hdwf, c_int(0))
-
-pf_pattern = c_double()
-dwf.FDwfDigitalOutInternalClockInfo(hdwf, byref(pf_pattern))
-print("Clock frequency: " + pf_pattern.value.__str__())
+#
+# pf_pattern = c_double()
+# dwf.FDwfDigitalOutInternalClockInfo(hdwf, byref(pf_pattern))
+# print("Clock frequency: " + pf_pattern.value.__str__())
 
 print("Generating custom waveform...")
 print("Enable: " + dwf.FDwfAnalogOutNodeEnableSet(hdwf, channel, AnalogOutNodeCarrier, c_int(1)).__str__())
