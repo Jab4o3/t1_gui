@@ -73,11 +73,11 @@ class Gui:
         if n <= 1:
             return result
 
-        for i in range(n):
+        for i in range(1, n):
             td_curr = td_min + round(10 ** (i * log10(td_max) / (n - 1)))
             # exits prematurely if min and max are too close
-            if td_curr + td_min >= td_max:
-                result[-1] = td_max
+            if td_curr >= td_max:
+                result.append(td_max)
                 return result
 
             # check if dark time is repeating last value and increment it if yes
@@ -85,7 +85,6 @@ class Gui:
                 result.append(td_curr)
             else:
                 result.append(result[-1] + 1)
-        # result.append(td_max)
         return result
 
     """
@@ -278,7 +277,7 @@ class Gui:
 
             # throw exception if data is lost
             if lost or corrupted:
-                self.log_message("T1 DAQ", "Lost data", f"Data lost or corrupted (data point {i})")
+                self.log_message("AD2", "Lost data", f"Data lost or corrupted (data point {i})")
                 raise ValueError(
                     f"Data lost or corrupted (data point {i}) due to high sample frequency ({daq_sf / 1000} kHz)")
 
