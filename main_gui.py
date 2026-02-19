@@ -134,7 +134,7 @@ class Gui:
             raise ValueError(f"Maximum dark time (td = {max_td}) cannot be smaller than the minimum (td = {min_td})")
         if max_td > 2000:
             self.log_message("T1", "Gen error",
-                             f"Maximum dark time is {max_td} bigger than minimum; should be less than 2000 ")
+                             f"Maximum dark time (td = {max_td}) too big for buffer; should be less than 2000 ")
             raise ValueError(f"Maximum dark time (td = {max_td}) too big for buffer")
         all_tds = self.gen_log_space(td_min=min_td, td_max=max_td, n=self.dps.get())  # pseudo-logspace of dark times
 
@@ -159,8 +159,8 @@ class Gui:
             return
         f_pattern = self.t1_generate_sequences()  # generate all sequences
 
-        run_time = 50  # run time (in seconds)
-        wait_time = 50  # wait time (in seconds)
+        run_time = 10  # run time (in seconds)
+        wait_time = 10  # wait time (in seconds)
         amplitude = c_double(5)  # signal amplitude (in volts)
         daq_sf = 10 ** 6  # sample frequency of the oscilloscope
         daq_samples = daq_sf * run_time  # samples to read from the scope
@@ -185,8 +185,8 @@ class Gui:
             dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, amplitude)
 
             # set the run and wait time (in seconds)
-            dwf.FDwfAnalogOutRunSet(self.hdwf, self.laser_channel, c_double(run_time / f_pattern))
-            dwf.FDwfAnalogOutWaitSet(self.hdwf, self.laser_channel, c_double(wait_time / f_pattern))
+            dwf.FDwfAnalogOutRunSet(self.hdwf, self.laser_channel, c_double(run_time))
+            dwf.FDwfAnalogOutWaitSet(self.hdwf, self.laser_channel, c_double(wait_time))
 
             # =LIA CHANNEL CONFIG=
             # enable
@@ -242,7 +242,7 @@ class Gui:
             corrupted = False  # initialize corrupted flag to false
 
             # enable
-            dwf.FDwfAnalogInConfigure(self.hdwf, c_int(1), c_int(0))
+            dwf.FDwfAnalogInConfigure(self.hdwf, c_int(0), c_int(1))
 
             # read
             while daq_samples_read < daq_samples:
@@ -263,17 +263,17 @@ class Gui:
                 if s_corrupted.value:
                     corrupted = True
 
-                # skip if no data available
-                if s_available.value > 0:
-                    # truncate data if too big for buffer
-                    if daq_samples_read + s_available.value > daq_samples:
-                        s_available = c_int(daq_samples - daq_samples_read)
+                if s_available.value == 0:
+                    break
+                # truncate data if too big for buffer
+                if daq_samples_read + s_available.value > daq_samples:
+                    s_available = c_int(daq_samples - daq_samples_read)
 
                     # get scope channel data and copy it to the buffer
-                    dwf.FDwfAnalogInStatusData(self.hdwf, self.scope_channel,
-                                               byref(daq_buffer, sizeof(c_double) * daq_samples_read),
-                                               s_available)
-                    daq_samples_read += s_available.value
+                dwf.FDwfAnalogInStatusData(self.hdwf, self.scope_channel,
+                                           byref(daq_buffer, sizeof(c_double) * daq_samples_read),
+                                           s_available)
+                daq_samples_read += s_available.value
 
             # throw exception if data is lost
             if lost or corrupted:
@@ -282,7 +282,7 @@ class Gui:
                     f"Data lost or corrupted (data point {i}) due to high sample frequency ({daq_sf / 1000} kHz)")
 
             # write data to csv file
-            self.file_name = f"data_point_{i}" + datetime.now().strftime("%d-%m-%Y_%H:%M:%S") + ".csv"
+            self.file_name = f"data_point_{i}" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".csv"
             f = open(self.file_name, "w")
             for j in daq_buffer:
                 f.write("%s\n" % j)

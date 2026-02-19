@@ -15,8 +15,8 @@ else:
 
 f_pattern = 100
 pattern_size = 4096
-td = 1  # dark time (in buffer slots)
-pw = 5  # pulse width (in buffer slots)
+td = 10  # dark time (in buffer slots)
+pw = 50  # pulse width (in buffer slots)
 print("+++++++++++++++++++++++++++")
 print("Dark time: " + str((10 ** 6) * td / (f_pattern * pattern_size)) + " us")
 print("Pulse width: " + str((10 ** 6) * pw / (f_pattern * pattern_size)) + " us")
