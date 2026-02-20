@@ -3,6 +3,7 @@ from dwfconstants import *
 from datetime import datetime
 import time
 import sys
+import matplotlib.pyplot as plt
 
 if sys.platform.startswith("win"):
     dwf = cdll.dwf
@@ -11,12 +12,14 @@ elif sys.platform.startswith("darwin"):
 else:
     dwf = cdll.LoadLibrary("libdwf.so")
 
-run_time = 10  # run time (in seconds)
-wait_time = 10  # wait time (in seconds)
+run_time = 2  # run time (in seconds)
+wait_time = 2  # wait time (in seconds)
 amplitude = c_double(5)  # signal amplitude (in volts)
-daq_sf = 10 ** 5  # sample frequency of the oscilloscope
+daq_sf = 5 * 10 ** 6  # sample frequency of the oscilloscope
+pulse_freq = 100000
 daq_samples = daq_sf * run_time  # samples to read from the scope
 scope_channel = c_int(0)
+lia_channel = c_int(0)
 hdwf = c_int()
 
 version = create_string_buffer(16)
@@ -51,7 +54,19 @@ s_corrupted = c_int()  # corrupted samples
 lost = False  # initialize lost flag to false
 corrupted = False  # initialize corrupted flag to false
 
+# =OUTPUT=
+# enable
+dwf.FDwfAnalogOutNodeEnableSet(hdwf, lia_channel, AnalogOutNodeCarrier, c_int(1))
+# set function to pulse
+dwf.FDwfAnalogOutNodeFunctionSet(hdwf, lia_channel, AnalogOutNodeCarrier, funcPulse)
+# set pulse frequency
+dwf.FDwfAnalogOutNodeFrequencySet(hdwf, lia_channel, AnalogOutNodeCarrier, c_double(pulse_freq))
+# set pulse amplitude to 5V
+dwf.FDwfAnalogOutNodeAmplitudeSet(hdwf, lia_channel, AnalogOutNodeCarrier, amplitude)
+# run continuously
+dwf.FDwfAnalogOutConfigure(hdwf, lia_channel, c_int(1))
 
+# =INPUT=
 # enable oscilloscope (acquisition) channel
 dwf.FDwfAnalogInChannelEnableSet(hdwf, scope_channel, c_int(1))
 # set the vertical range of the oscilloscope to 5V
@@ -61,17 +76,16 @@ dwf.FDwfAnalogInAcquisitionModeSet(hdwf, acqmodeRecord)
 # set the sample frequency of the acquisition to 1MHz
 dwf.FDwfAnalogInFrequencySet(hdwf, c_double(daq_sf))
 # set the length of the recording to equal that of the run time (or -1 for infinite recording length)
-dwf.FDwfAnalogInRecordLengthSet(hdwf, c_double(daq_samples/daq_sf))
+dwf.FDwfAnalogInRecordLengthSet(hdwf, c_double(daq_samples / daq_sf))
 # reset trigger timeout and wait for offset to stabilize
 dwf.FDwfAnalogInConfigure(hdwf, c_int(1), c_int(0))
-time.sleep(2)
+time.sleep(wait_time)
 
 # enable
 dwf.FDwfAnalogInConfigure(hdwf, c_int(0), c_int(1))
 
 # read
 while daq_samples_read < daq_samples:
-    print(f"{daq_samples_read} < {daq_samples}")
     dwf.FDwfAnalogInStatus(hdwf, c_int(1), byref(status))
     if daq_samples_read == 0 and (
             status == DwfStateConfig or status == DwfStatePrefill or status == DwfStateArmed):
@@ -97,8 +111,8 @@ while daq_samples_read < daq_samples:
 
         # get scope channel data and copy it to the buffer
     dwf.FDwfAnalogInStatusData(hdwf, scope_channel,
-                                   byref(daq_buffer, sizeof(c_double) * daq_samples_read),
-                                   s_available)
+                               byref(daq_buffer, sizeof(c_double) * daq_samples_read),
+                               s_available)
     daq_samples_read += s_available.value
 
     print(f"{daq_samples_read} of {daq_samples}")
@@ -106,12 +120,19 @@ while daq_samples_read < daq_samples:
 # throw exception if data is lost
 if lost or corrupted:
     print("AD2", "Lost data", f"Data lost or corrupted")
-    raise ValueError(
-        f"Data lost or corrupted due to high sample frequency ({daq_sf / 1000} kHz)")
+    # raise ValueError(
+    #     f"Data lost or corrupted due to high sample frequency ({daq_sf / 1000} kHz)")
 
 # write data to csv file
-file_name = f"data_point_" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".csv"
+file_name = f"./logs/data_point_" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".csv"
 f = open(file_name, "a")
 for j in daq_buffer:
     f.write("%s\n" % j)
 f.close()
+
+plt.plot(daq_buffer)
+plt.xlabel("Time")
+plt.xlim(0, 5 * daq_sf / pulse_freq)
+plt.ylabel("Voltage (V)")
+
+plt.show()

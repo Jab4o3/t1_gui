@@ -46,6 +46,9 @@ class Gui:
         self.entry_dps = None
         # tree view for running log and status messages
         self.tree_running_log = None
+        # plot figure and widget
+        self.fig = None
+        self.canvas = None
 
         # startup code for creating and rendering app
         self.populate()
@@ -159,10 +162,11 @@ class Gui:
             return
         f_pattern = self.t1_generate_sequences()  # generate all sequences
 
-        run_time = 10  # run time (in seconds)
-        wait_time = 10  # wait time (in seconds)
+        run_time = 2  # run time (in seconds)
+        wait_time = 2  # wait time (in seconds) (should be at least 2)
         amplitude = c_double(5)  # signal amplitude (in volts)
-        daq_sf = 10 ** 6  # sample frequency of the oscilloscope
+        # TODO: current frequency results in data loss; fix
+        daq_sf = 5 * 10 ** 6  # sample frequency of the oscilloscope
         daq_samples = daq_sf * run_time  # samples to read from the scope
         self.log_message("T1", "Test started", "Values generated successfully")
         for i in range(len(self.sequences)):
@@ -184,9 +188,8 @@ class Gui:
             # set amplitude of the whole pattern to 5V
             dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, amplitude)
 
-            # set the run and wait time (in seconds)
-            dwf.FDwfAnalogOutRunSet(self.hdwf, self.laser_channel, c_double(run_time))
-            dwf.FDwfAnalogOutWaitSet(self.hdwf, self.laser_channel, c_double(wait_time))
+            # run continuously until reset
+            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
 
             # =LIA CHANNEL CONFIG=
             # enable
@@ -201,9 +204,13 @@ class Gui:
             # set pulse amplitude to 5V
             dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, amplitude)
 
-            # set the run and wait time (in seconds)
-            dwf.FDwfAnalogOutRunSet(self.hdwf, self.lia_channel, c_double(run_time / f_pattern))
-            dwf.FDwfAnalogOutWaitSet(self.hdwf, self.lia_channel, c_double(wait_time / f_pattern))
+            # run continuously until reset
+            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
+
+            # =OUTPUT=
+            # start outputting
+            dwf.FDwfAnalogOutConfigure(self.hdwf, self.laser_channel, c_int(1))
+            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
 
             # =OSCILLOSCOPE (DAQ) CHANNEL CONFIG=
             # enable oscilloscope (acquisition) channel
@@ -215,22 +222,19 @@ class Gui:
             # set the mode of the oscilloscope to record (continuously reading data)
             dwf.FDwfAnalogInAcquisitionModeSet(self.hdwf, acqmodeRecord)
 
-            # set the sample frequency of the acquisition to 1MHz
+            # set the sample frequency of the acquisition to 5MHz
             dwf.FDwfAnalogInFrequencySet(self.hdwf, c_double(daq_sf))
 
             # set the length of the recording to equal that of the run time (or -1 for infinite recording length)
-            dwf.FDwfAnalogInRecordLengthSet(self.hdwf, c_double(daq_samples))
+            dwf.FDwfAnalogInRecordLengthSet(self.hdwf, c_double(run_time))
 
-            # reset trigger timeout and wait for offset to stabilize
+            # reset trigger timeout and wait for offset to stabilize (also wait for output wait period to finish)
             dwf.FDwfAnalogInConfigure(self.hdwf, c_int(1), c_int(0))
-            time.sleep(2)
+            time.sleep(wait_time)
 
             self.log_message("T1", "Sequence started", f"Starting data point number {i}")
-            # =OUTPUT/DAQ=
-            # start outputting
-            dwf.FDwfAnalogOutConfigure(self.hdwf, self.laser_channel, c_int(1))
-            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
 
+            # =DAQ=
             # start reading
             status = c_byte()  # recording status
             daq_samples_read = 0  # number of read samples
@@ -269,32 +273,34 @@ class Gui:
                 if daq_samples_read + s_available.value > daq_samples:
                     s_available = c_int(daq_samples - daq_samples_read)
 
-                    # get scope channel data and copy it to the buffer
+                # get scope channel data and copy it to the buffer
                 dwf.FDwfAnalogInStatusData(self.hdwf, self.scope_channel,
                                            byref(daq_buffer, sizeof(c_double) * daq_samples_read),
                                            s_available)
                 daq_samples_read += s_available.value
 
-            # throw exception if data is lost
-            if lost or corrupted:
-                self.log_message("AD2", "Lost data", f"Data lost or corrupted (data point {i})")
-                raise ValueError(
-                    f"Data lost or corrupted (data point {i}) due to high sample frequency ({daq_sf / 1000} kHz)")
-
             # write data to csv file
-            self.file_name = f"data_point_{i}" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".csv"
+            self.file_name = "./logs/" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + f"_data_point_{i}" + ".csv"
             f = open(self.file_name, "w")
             for j in daq_buffer:
                 f.write("%s\n" % j)
             f.close()
 
-            # wait for this sequence to complete before moving on
-            time.sleep(run_time + wait_time)
+            # throw exception if data is lost
+            if lost or corrupted:
+                self.log_message("AD2", "Lost data",
+                                 f"Data lost or corrupted (data point {i}, sample frequency {daq_sf / 1000} kHz)")
+                # raise ValueError(
+                #     f"Data lost or corrupted (data point {i}) due to high sample frequency ({daq_sf / 1000} kHz)")
+
+            # TODO: implement T1 calculation function; this should plot T1 not pulses
+            self.update_plot(daq_buffer[:15000])
 
         # reset and close device
         dwf.FDwfAnalogOutReset(self.hdwf, self.laser_channel)
         dwf.FDwfAnalogOutReset(self.hdwf, self.lia_channel)
         dwf.FDwfDeviceCloseAll()
+        self.log_message("T1", "Finished test", "Finished T1 measurements")
 
     """
     Threaded version of the T1 command
@@ -384,8 +390,11 @@ class Gui:
             self.dps.set(self.entry_dps.get())
             self.scale_dps.set(self.dps.get())
 
-    # def command_find_device(self):
-
+    def update_plot(self, data):
+        if self.fig is not None and self.canvas is not None:
+            self.fig.clear()  # clear existing data
+            self.fig.add_subplot().plot(data)
+            self.canvas.draw_idle()
 
     """
     Put GUI objects in app
@@ -506,20 +515,21 @@ class Gui:
 
         # =DATA FRAME=
         # create random figure
-        fig = Figure(figsize=(6, 4), dpi=100)
+        self.fig = Figure(figsize=(6, 4), dpi=100)
         t = np.arange(0, 3, .01)
-        ax = fig.add_subplot()
+        ax = self.fig.add_subplot()
         line, = ax.plot(t, 2 * np.sin(2 * np.pi * t))
         ax.set_xlabel("time [s]")
         ax.set_ylabel("f(t)")
-        canvas = FigureCanvasTkAgg(fig, master=lf_data)
-        canvas.draw()
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=lf_data)
+        self.canvas.draw_idle()
         # pack_toolbar=False will make it easier to use a layout manager later on.
-        toolbar = NavigationToolbar2Tk(canvas, lf_data, pack_toolbar=False)
+        toolbar = NavigationToolbar2Tk(self.canvas, lf_data, pack_toolbar=False)
         toolbar.update()
 
         # put figure on canvas
-        canvas.get_tk_widget().grid(row=0, column=0, padx=5, pady=5)
+        self.canvas.get_tk_widget().grid(row=0, column=0, padx=5, pady=5)
         toolbar.grid(row=1, column=0, padx=5, pady=5)
 
 
