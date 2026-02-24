@@ -123,6 +123,7 @@ class Gui:
     Generate sequences for pulsing
     """
 
+    # fs = (1/min_td)*25
     def t1_generate_sequences(self):
         # constants
         pw = 5  # pulse width (in buffer slots)
@@ -188,9 +189,6 @@ class Gui:
             # set amplitude of the whole pattern to 5V
             dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.laser_channel, AnalogOutNodeCarrier, amplitude)
 
-            # run continuously until reset
-            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
-
             # =LIA CHANNEL CONFIG=
             # enable
             dwf.FDwfAnalogOutNodeEnableSet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, c_int(1))
@@ -204,11 +202,8 @@ class Gui:
             # set pulse amplitude to 5V
             dwf.FDwfAnalogOutNodeAmplitudeSet(self.hdwf, self.lia_channel, AnalogOutNodeCarrier, amplitude)
 
-            # run continuously until reset
-            dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
-
             # =OUTPUT=
-            # start outputting
+            # start outputting until reset
             dwf.FDwfAnalogOutConfigure(self.hdwf, self.laser_channel, c_int(1))
             dwf.FDwfAnalogOutConfigure(self.hdwf, self.lia_channel, c_int(1))
 
@@ -390,11 +385,15 @@ class Gui:
             self.dps.set(self.entry_dps.get())
             self.scale_dps.set(self.dps.get())
 
+    """
+    Replaces the plot displayed by the GUI canvas with a plot of the data passed to it
+    """
+
     def update_plot(self, data):
         if self.fig is not None and self.canvas is not None:
-            self.fig.clear()  # clear existing data
-            self.fig.add_subplot().plot(data)
-            self.canvas.draw_idle()
+            self.fig.clear()  # clear previous plot
+            self.fig.add_subplot().plot(data)  # add plot to figure
+            self.canvas.draw_idle()  # draw updated figure on canvas
 
     """
     Put GUI objects in app
