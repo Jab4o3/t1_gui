@@ -477,7 +477,7 @@ class Gui:
         self.entry_dps = ttk.Entry(lf_inputs)
 
         # create sliders and bind to callbacks
-        self.scale_p_width = tk.Scale(lf_inputs, from_=0.1, to=10, resolution=0.01, orient=tk.HORIZONTAL)
+        self.scale_p_width = tk.Scale(lf_inputs, from_=1, to=10, resolution=0.01, orient=tk.HORIZONTAL)
         self.scale_p_width.bind("<ButtonRelease-1>", self.callback_s_p_width)
         self.scale_p_width.set(self.p_width.get())
         self.scale_td_max = tk.Scale(lf_inputs, from_=0.01, to=5, resolution=0.01, orient=tk.HORIZONTAL)
